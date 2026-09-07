@@ -840,6 +840,19 @@ class ChatNamespace(socketio.AsyncNamespace):
                 if team_error:
                     logger.error("[WS] chat:send error: %s", team_error["error"])
                     return team_error
+                # Object-level authorization: identical semantics to task:join
+                # and the REST task paths. Rejected before any state mutation
+                # or room join; the "not found" shape avoids leaking whether
+                # the task exists.
+                if not task_stores.task_access_store.is_member(
+                    db, task_id=existing_task.id, user_id=user_id
+                ):
+                    logger.warning(
+                        "[WS] chat:send error: Access denied, user=%s, task=%s",
+                        user_id,
+                        payload.task_id,
+                    )
+                    return {"error": "Task not found"}
                 logger.info(
                     f"[WS] chat:send using task team: {team.name} (id={team.id})"
                 )
@@ -849,6 +862,17 @@ class ChatNamespace(socketio.AsyncNamespace):
                 if not team:
                     logger.error(
                         f"[WS] chat:send error: Team not found for id={payload.team_id}"
+                    )
+                    return {"error": "Team not found"}
+                # Team-use authorization: identical semantics to the REST team
+                # detail path (owner, public, shared, or group member).
+                from app.services.share.team_share_service import team_share_service
+
+                if not team_share_service.get_resource(db, team.id, user_id):
+                    logger.warning(
+                        "[WS] chat:send error: Team access denied, user=%s, team=%s",
+                        user_id,
+                        payload.team_id,
                     )
                     return {"error": "Team not found"}
                 logger.info(f"[WS] chat:send team found: {team.name} (id={team.id})")
@@ -1430,7 +1454,7 @@ class ChatNamespace(socketio.AsyncNamespace):
         try:
             # Verify ownership - run in executor to avoid blocking
             subtask_info = await run_sync_in_executor(
-                _get_subtask_for_cancel, payload.subtask_id
+                _get_subtask_for_cancel, payload.subtask_id, user_id
             )
 
             if not subtask_info:
@@ -2200,20 +2224,29 @@ def _fetch_subtasks_for_task_join(
             return task_detail.get("subtasks")
 
 
-def _get_subtask_for_cancel(subtask_id: int) -> Optional[dict]:
+def _get_subtask_for_cancel(subtask_id: int, user_id: int) -> Optional[dict]:
     """
-    Get subtask info for chat:cancel event.
+    Get subtask info for chat:cancel event, authorized for *user_id*.
 
     Args:
         subtask_id: Subtask ID
+        user_id: Requesting user ID
 
     Returns:
-        Dict with subtask info or None if not found
+        Dict with subtask info, or None when the subtask does not exist or the
+        user has no access to it (so cancel never proceeds on either case)
     """
     with get_db_session() as db:
         subtask = task_stores.subtask_store.get_by_id(db, subtask_id=subtask_id)
 
         if not subtask:
+            return None
+
+        # Object-level authorization must precede every cancel side effect
+        # (state mutation, board update, runtime dispatch).
+        if not task_stores.task_access_store.is_member(
+            db, task_id=subtask.task_id, user_id=user_id
+        ):
             return None
 
         return {
