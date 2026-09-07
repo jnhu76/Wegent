@@ -12,8 +12,20 @@ Configuration module, stores application configuration parameters
 
 # API Configuration
 import os
+from typing import Dict
 
 TASK_API_DOMAIN = os.getenv("TASK_API_DOMAIN", "http://localhost:8000")
+
+# Backend internal service authentication (must match backend INTERNAL_SERVICE_TOKEN)
+INTERNAL_SERVICE_TOKEN = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+
+
+def internal_service_auth_headers() -> Dict[str, str]:
+    """Build Authorization headers for backend internal API calls."""
+    token = INTERNAL_SERVICE_TOKEN.strip()
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
 
 # API timeout
 API_TIMEOUT = 3  # API request timeout (seconds)

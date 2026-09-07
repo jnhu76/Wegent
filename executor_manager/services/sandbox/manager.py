@@ -28,7 +28,11 @@ from executor_manager.common.distributed_lock import (
     get_distributed_lock,
 )
 from executor_manager.common.singleton import SingletonMeta
-from executor_manager.config.config import EXECUTOR_DISPATCHER_MODE, TASK_API_DOMAIN
+from executor_manager.config.config import (
+    EXECUTOR_DISPATCHER_MODE,
+    TASK_API_DOMAIN,
+    internal_service_auth_headers,
+)
 from executor_manager.executors.dispatcher import ExecutorDispatcher
 from executor_manager.models.sandbox import (
     Execution,
@@ -1073,10 +1077,14 @@ class SandboxManager(metaclass=SingletonMeta):
         """Post a sandbox archive/restore request to backend without raising."""
         try:
             async with httpx.AsyncClient(timeout=130.0) as client:
+                headers = {
+                    "Content-Type": "application/json",
+                    **internal_service_auth_headers(),
+                }
                 response = await client.post(
                     url,
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                 )
                 response.raise_for_status()
                 data = response.json()

@@ -20,7 +20,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import httpx
 import requests
 
-from executor_manager.config.config import EXECUTOR_ENV
+from executor_manager.config.config import (
+    EXECUTOR_ENV,
+    internal_service_auth_headers,
+)
 from executor_manager.executors.base import Executor
 from executor_manager.executors.docker.constants import (
     CONTAINER_OWNER,
@@ -465,6 +468,19 @@ class DockerExecutor(Executor):
         )
 
         try:
+            # Report the pull/start phase immediately: the backend validation
+            # record expires 5 minutes after its last update, so the first
+            # report must land before a long image pull, not after it.
+            if is_validation_task:
+                self._report_validation_stage(
+                    task,
+                    stage="pulling_image",
+                    status="running",
+                    progress=20,
+                    message="Pulling image and starting validation container",
+                    executor_name=executor_name,
+                )
+
             result = self.subprocess.run(
                 cmd, check=True, capture_output=True, text=True
             )
@@ -492,6 +508,7 @@ class DockerExecutor(Executor):
                     status="running",
                     progress=50,
                     message="Container started, running validation checks",
+                    executor_name=executor_name,
                 )
 
             # Check if container is still running after a short delay
@@ -516,6 +533,7 @@ class DockerExecutor(Executor):
                     message=f"Container start failed: {error_msg}",
                     error_message=error_msg,
                     valid=False,
+                    executor_name=executor_name,
                 )
             raise
 
@@ -794,6 +812,7 @@ class DockerExecutor(Executor):
                         message=f"Container exited immediately: {error_msg}",
                         error_message=error_msg,
                         valid=False,
+                        executor_name=executor_name,
                     )
 
                     # Clean up the failed container
@@ -1503,6 +1522,7 @@ class DockerExecutor(Executor):
         message: str,
         error_message: Optional[str] = None,
         valid: Optional[bool] = None,
+        executor_name: Optional[str] = None,
     ) -> None:
         """
         Report validation stage progress to Backend via HTTP call.
@@ -1515,6 +1535,8 @@ class DockerExecutor(Executor):
             message: Human-readable message
             error_message: Optional error message
             valid: Optional validation result (True/False/None)
+            executor_name: Local container name, used to clean up when the
+                backend no longer knows this validation
         """
         validation_params = get_metadata_field(task, "validation_params", {})
         validation_id = (
@@ -1538,17 +1560,69 @@ class DockerExecutor(Executor):
 
         try:
             with traced_sync_client(timeout=10.0) as client:
-                response = client.post(update_url, json=update_payload)
+                response = client.post(
+                    update_url,
+                    json=update_payload,
+                    headers=internal_service_auth_headers(),
+                )
                 if response.status_code == 200:
                     logger.info(
                         f"Reported validation stage: {validation_id} -> {stage} ({progress}%)"
                     )
+                elif response.status_code == 404:
+                    # The backend rejected the ID (expired record or unknown
+                    # validation): its result can never be delivered, so remove
+                    # the local container instead of leaking it.
+                    self._cleanup_expired_validation(task, executor_name)
                 else:
                     logger.warning(
                         f"Failed to report validation stage: {response.status_code} {response.text}"
                     )
         except Exception as e:
             logger.error(f"Error reporting validation stage: {e}")
+
+    def _cleanup_expired_validation(
+        self, task: Dict[str, Any], executor_name: Optional[str]
+    ) -> None:
+        """Remove the local validation container when its record is unknown.
+
+        Called when the backend answers 404 for a validation status report.
+        Best-effort: cleanup failures are logged and never mask the original
+        report outcome.
+        """
+        if not executor_name:
+            logger.warning(
+                "Backend reported unknown validation record and no local "
+                "container name is available; skipping cleanup"
+            )
+            return
+
+        if self._should_keep_failed_validation_container(task):
+            logger.info(
+                "Keeping validation container %s for debugging "
+                "(VALIDATION_KEEP_FAILED_CONTAINER=true) after its backend "
+                "record expired",
+                executor_name,
+            )
+            return
+
+        try:
+            result = delete_container(executor_name)
+            if result.get("status") == "success":
+                logger.warning(
+                    f"Removed validation container {executor_name}: backend "
+                    f"validation record expired or unknown (404)"
+                )
+            else:
+                logger.warning(
+                    f"Validation record expired or unknown (404); container "
+                    f"{executor_name} removal did not succeed: {result}"
+                )
+        except Exception as cleanup_error:
+            logger.warning(
+                f"Failed to cleanup container {executor_name} after validation "
+                f"record expiry: {cleanup_error}"
+            )
 
     def get_container_status(self, executor_name: str) -> Dict[str, Any]:
         """Get detailed status information for a Docker container.

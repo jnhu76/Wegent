@@ -19,10 +19,15 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_db
 from app.models.kind import Kind
 from app.schemas.kind import Bot, Ghost
+from app.services.auth.internal_service_token import verify_internal_service_token
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/bots", tags=["internal-bots"])
+router = APIRouter(
+    dependencies=[Depends(verify_internal_service_token)],
+    prefix="/bots",
+    tags=["internal-bots"],
+)
 
 
 class MCPServersResponse(BaseModel):

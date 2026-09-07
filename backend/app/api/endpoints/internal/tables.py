@@ -15,15 +15,20 @@ Authentication:
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from app.services.auth.internal_service_token import verify_internal_service_token
 from app.services.tables import DataTableService, TableQueryRequest
 from app.services.tables.providers import DingTalkProvider  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/tables", tags=["internal-tables"])
+router = APIRouter(
+    dependencies=[Depends(verify_internal_service_token)],
+    prefix="/tables",
+    tags=["internal-tables"],
+)
 
 
 class InternalTableQueryRequest(BaseModel):
