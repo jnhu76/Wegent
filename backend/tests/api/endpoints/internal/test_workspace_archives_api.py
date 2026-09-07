@@ -7,14 +7,28 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.subtask import Subtask, SubtaskRole, SubtaskStatus
 from app.models.task import TaskResource
 from app.models.user import User
 from app.schemas.kind import ArchiveInfo
 from app.services.workspace_archive import archive_service, archive_storage_service
+
+INTERNAL_TOKEN = "test-internal-token"
+
+
+@pytest.fixture(autouse=True)
+def configure_internal_service_token(
+    monkeypatch: pytest.MonkeyPatch, test_client: TestClient
+) -> None:
+    """These tests exercise the executor_manager caller path, which
+    authenticates with the internal service token."""
+    monkeypatch.setattr(settings, "INTERNAL_SERVICE_TOKEN", INTERNAL_TOKEN)
+    test_client.headers.update({"Authorization": f"Bearer {INTERNAL_TOKEN}"})
 
 
 def _create_task(test_db: Session, task_id: int, user_id: int) -> TaskResource:
