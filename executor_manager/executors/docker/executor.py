@@ -20,7 +20,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import httpx
 import requests
 
-from executor_manager.config.config import EXECUTOR_ENV
+from executor_manager.config.config import (
+    EXECUTOR_ENV,
+    internal_service_auth_headers,
+)
 from executor_manager.executors.base import Executor
 from executor_manager.executors.docker.constants import (
     CONTAINER_OWNER,
@@ -1538,7 +1541,11 @@ class DockerExecutor(Executor):
 
         try:
             with traced_sync_client(timeout=10.0) as client:
-                response = client.post(update_url, json=update_payload)
+                response = client.post(
+                    update_url,
+                    json=update_payload,
+                    headers=internal_service_auth_headers(),
+                )
                 if response.status_code == 200:
                     logger.info(
                         f"Reported validation stage: {validation_id} -> {stage} ({progress}%)"

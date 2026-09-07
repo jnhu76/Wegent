@@ -10,7 +10,7 @@ from executor_manager.routers import routers
 
 
 class _FakeAsyncClient:
-    async def post(self, url, json):
+    async def post(self, url, json=None, headers=None):
         return SimpleNamespace(status_code=200, text="ok")
 
 
@@ -26,7 +26,7 @@ class _RecordingAsyncClient:
     def __init__(self, requests):
         self.requests = requests
 
-    async def post(self, url, json):
+    async def post(self, url, json=None, headers=None):
         self.requests.append((url, json))
         return SimpleNamespace(status_code=200, text="ok")
 

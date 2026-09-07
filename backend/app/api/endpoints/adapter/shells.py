@@ -20,6 +20,7 @@ from app.core.cache import cache_manager
 from app.models.kind import Kind
 from app.models.user import User
 from app.schemas.kind import Shell as ShellCRD
+from app.services.auth.internal_service_token import verify_internal_service_token
 from app.services.capability_reference_service import (
     get_referenced_capability,
     list_referenced_capabilities,
@@ -923,8 +924,14 @@ async def _update_validation_status(
     checks: Optional[List[dict]] = None,
     errors: Optional[List[str]] = None,
     error_message: Optional[str] = None,
+    executor_name: Optional[str] = None,
 ) -> bool:
-    """Helper function to update validation status in Redis"""
+    """Helper function to update validation status in Redis
+
+    When executor_name is provided and the record has no bound executor yet,
+    the first reporter becomes the trusted executor identity for cleanup.
+    Later reports naming a different executor are rejected by the caller.
+    """
     try:
         cache_key = f"{VALIDATION_STATUS_KEY_PREFIX}{validation_id}"
         existing = await cache_manager.get(cache_key)
@@ -957,6 +964,8 @@ async def _update_validation_status(
             existing["errors"] = errors
         if error_message is not None:
             existing["error_message"] = error_message
+        if executor_name and not existing.get("executor_name"):
+            existing["executor_name"] = executor_name
         existing["updated_at"] = datetime.utcnow().isoformat()
 
         await cache_manager.set(cache_key, existing, expire=VALIDATION_STATUS_TTL)
@@ -1012,17 +1021,45 @@ async def get_validation_status(
 async def update_validation_status(
     validation_id: str,
     request: ValidationStatusUpdateRequest,
+    _: None = Depends(verify_internal_service_token),
 ):
     """
     Update the status of a validation task (internal API for Executor Manager callback).
 
     This endpoint is called by Executor Manager to update validation progress.
-    Note: This is an internal API and should not be exposed publicly.
+    It requires internal service authentication.
+
+    Security binding: the validation record must already exist (created by
+    POST /shells/validate-image), and container cleanup may only target the
+    executor identity bound to that record. Unknown validation IDs and
+    mismatched executor names are rejected without side effects.
 
     When validation is completed (status is 'completed' or progress is 100),
     this will automatically cleanup the validation container if executor_name is provided.
     """
     try:
+        cache_key = f"{VALIDATION_STATUS_KEY_PREFIX}{validation_id}"
+        existing = await cache_manager.get(cache_key)
+
+        if existing is None:
+            # Only validations submitted by this backend may be updated or
+            # cleaned up; never create state from caller-supplied IDs.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Validation status not found for ID: {validation_id}",
+            )
+
+        bound_executor = existing.get("executor_name")
+        if (
+            request.executor_name
+            and bound_executor
+            and request.executor_name != bound_executor
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Executor name does not match the validation record",
+            )
+
         success = await _update_validation_status(
             validation_id=validation_id,
             status=request.status,
@@ -1032,6 +1069,7 @@ async def update_validation_status(
             checks=[c.model_dump() for c in request.checks] if request.checks else None,
             errors=request.errors,
             error_message=request.errorMessage,
+            executor_name=request.executor_name,
         )
 
         if not success:
