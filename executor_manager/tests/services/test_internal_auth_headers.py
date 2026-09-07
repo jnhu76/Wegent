@@ -124,6 +124,142 @@ async def test_validation_stage_report_sends_internal_token(mocker, configure_to
     assert captured[0]["headers"] == {"Authorization": "Bearer em-secret-token"}
 
 
+def _stage_report_executor(mocker, keep_failed: bool = False) -> DockerExecutor:
+    executor = DockerExecutor.__new__(DockerExecutor)
+    mocker.patch.object(
+        executor,
+        "_should_keep_failed_validation_container",
+        return_value=keep_failed,
+    )
+    return executor
+
+
+def _stage_report_client(mocker, captured, status_code: int):
+    sync_client = MagicMock()
+    sync_response = MagicMock()
+    sync_response.status_code = status_code
+    sync_response.text = f"status={status_code}"
+    sync_client.post.side_effect = lambda url, **kwargs: (
+        captured.append({"url": url, **kwargs}),
+        sync_response,
+    )[1]
+    sync_cm = MagicMock()
+    sync_cm.__enter__ = MagicMock(return_value=sync_client)
+    sync_cm.__exit__ = MagicMock(return_value=None)
+    mocker.patch.object(
+        docker_executor_module, "traced_sync_client", return_value=sync_cm
+    )
+
+
+_STAGE_TASK = {
+    "metadata": {"task_id": 1, "validation_params": {"validation_id": "val-9"}}
+}
+
+
+def test_validation_stage_report_404_cleans_up_local_container(mocker, configure_token):
+    configure_token("em-secret-token")
+    captured = []
+    _stage_report_client(mocker, captured, status_code=404)
+    delete_container = mocker.patch.object(docker_executor_module, "delete_container")
+    executor = _stage_report_executor(mocker, keep_failed=False)
+
+    executor._report_validation_stage(
+        _STAGE_TASK,
+        stage="starting_container",
+        status="running",
+        progress=50,
+        message="Container started",
+        executor_name="wegent-executor-1",
+    )
+
+    delete_container.assert_called_once_with("wegent-executor-1")
+
+
+def test_validation_stage_report_404_honors_keep_failed_flag(mocker, configure_token):
+    configure_token("em-secret-token")
+    captured = []
+    _stage_report_client(mocker, captured, status_code=404)
+    delete_container = mocker.patch.object(docker_executor_module, "delete_container")
+    executor = _stage_report_executor(mocker, keep_failed=True)
+
+    executor._report_validation_stage(
+        _STAGE_TASK,
+        stage="starting_container",
+        status="running",
+        progress=50,
+        message="Container started",
+        executor_name="wegent-executor-1",
+    )
+
+    delete_container.assert_not_called()
+
+
+def test_validation_stage_report_404_without_container_name_skips_cleanup(mocker, configure_token):
+    configure_token("em-secret-token")
+    captured = []
+    _stage_report_client(mocker, captured, status_code=404)
+    delete_container = mocker.patch.object(docker_executor_module, "delete_container")
+    executor = _stage_report_executor(mocker, keep_failed=False)
+
+    executor._report_validation_stage(
+        _STAGE_TASK,
+        stage="starting_container",
+        status="running",
+        progress=50,
+        message="Container started",
+    )
+
+    delete_container.assert_not_called()
+
+
+def test_validation_stage_report_server_error_does_not_cleanup(mocker, configure_token):
+    configure_token("em-secret-token")
+    captured = []
+    _stage_report_client(mocker, captured, status_code=502)
+    delete_container = mocker.patch.object(docker_executor_module, "delete_container")
+    executor = _stage_report_executor(mocker, keep_failed=False)
+
+    executor._report_validation_stage(
+        _STAGE_TASK,
+        stage="starting_container",
+        status="running",
+        progress=50,
+        message="Container started",
+        executor_name="wegent-executor-1",
+    )
+
+    delete_container.assert_not_called()
+
+
+def test_create_instance_reports_pulling_image_before_docker_run(mocker, configure_token):
+    configure_token("em-secret-token")
+    executor = DockerExecutor.__new__(DockerExecutor)
+    order = []
+    run_mock = MagicMock(
+        side_effect=lambda *args, **kwargs: order.append("docker_run")
+        or SimpleNamespace(stdout="container-id\n")
+    )
+    executor.subprocess = MagicMock(run=run_mock)
+    mocker.patch.object(executor, "_get_base_image_from_task", return_value=None)
+    mocker.patch.object(
+        executor, "_get_executor_image", return_value="wegent-executor:latest"
+    )
+    mocker.patch.object(
+        executor, "_prepare_docker_command", return_value=["docker", "run", "img"]
+    )
+    mocker.patch.object(executor, "register_task_for_heartbeat")
+    report_mock = MagicMock(
+        side_effect=lambda task, **kwargs: order.append(f"report:{kwargs['stage']}")
+    )
+    mocker.patch.object(executor, "_report_validation_stage", report_mock)
+
+    task = {"metadata": {"task_id": 1, "subtask_id": 2, "type": "validation"}}
+    executor.create_instance(task, {"task_id": 1, "subtask_id": 2}, "exec-1")
+
+    assert order == ["report:pulling_image", "docker_run", "report:starting_container"]
+    assert report_mock.call_args_list[0].kwargs["executor_name"] == "exec-1"
+
+
 @pytest.mark.asyncio
 async def test_workspace_archive_callback_sends_internal_token(
     mocker, configure_token

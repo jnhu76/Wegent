@@ -7,9 +7,12 @@ internal service token. Anonymous or invalid callers must be rejected before
 any handler logic runs (no DB mutation, no secret readback)."""
 
 import pytest
+from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
+from app.services.auth.internal_service_token import verify_internal_service_token
 
 INTERNAL_TOKEN = "test-internal-token"
 
@@ -58,6 +61,24 @@ def test_internal_routes_reject_invalid_tokens(
     )
 
     assert response.status_code == 401
+
+
+def test_internal_token_dependency_rejects_non_ascii_probe(
+    test_client: TestClient,
+) -> None:
+    """hmac.compare_digest raises TypeError on non-ASCII str inputs; ASGI
+    servers hand the dependency latin-1-decoded header values, so the
+    dependency itself must keep malformed probes on the 401 path instead of
+    surfacing a 500. (httpx cannot send non-ASCII headers, hence the direct
+    dependency call.)"""
+    credentials = HTTPAuthorizationCredentials(
+        scheme="Bearer", credentials="tökën-ïnvälid"
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        verify_internal_service_token(credentials=credentials)
+
+    assert exc_info.value.status_code == 401
 
 
 @pytest.mark.parametrize("method,path,body", PROTECTED_ROUTES)
