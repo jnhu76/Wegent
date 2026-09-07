@@ -796,7 +796,9 @@ async def validate_image(
         logger.info(f"Initialized validation status in Redis: {validation_id}")
     except Exception as e:
         logger.error(f"Failed to initialize validation status in Redis: {e}")
-        # Continue even if Redis fails - validation can still work
+        # Continue: without an initial record the validation result can never
+        # be delivered, and the executor reaps the container when its first
+        # stage report finds no record.
 
     # Get executor manager URL from environment
     executor_manager_url = os.getenv("EXECUTOR_MANAGER_URL", "http://localhost:8001")
@@ -1039,7 +1041,17 @@ async def update_validation_status(
     """
     try:
         cache_key = f"{VALIDATION_STATUS_KEY_PREFIX}{validation_id}"
-        existing = await cache_manager.get(cache_key)
+        try:
+            existing = await cache_manager.get_strict(cache_key)
+        except Exception:
+            # The executor deletes the container when this endpoint answers
+            # 404, so a transient cache outage must surface as 503 instead of
+            # masquerading as a missing record.
+            logger.exception("Validation status cache read failed")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Validation status store is unavailable",
+            )
 
         if existing is None:
             # Only validations submitted by this backend may be updated or

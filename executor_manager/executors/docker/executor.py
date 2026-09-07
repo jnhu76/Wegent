@@ -1607,11 +1607,17 @@ class DockerExecutor(Executor):
             return
 
         try:
-            delete_container(executor_name)
-            logger.warning(
-                f"Removed validation container {executor_name}: backend "
-                f"validation record expired or unknown (404)"
-            )
+            result = delete_container(executor_name)
+            if result.get("status") == "success":
+                logger.warning(
+                    f"Removed validation container {executor_name}: backend "
+                    f"validation record expired or unknown (404)"
+                )
+            else:
+                logger.warning(
+                    f"Validation record expired or unknown (404); container "
+                    f"{executor_name} removal did not succeed: {result}"
+                )
         except Exception as cleanup_error:
             logger.warning(
                 f"Failed to cleanup container {executor_name} after validation "

@@ -47,6 +47,9 @@ class FakeCache:
     async def get(self, key: str) -> Any:
         return self.store.get(key)
 
+    async def get_strict(self, key: str) -> Any:
+        return self.store.get(key)
+
     async def set(self, key: str, value: Any, expire: Optional[int] = None) -> None:
         self.writes.append(key)
         self.store[key] = value
@@ -117,6 +120,33 @@ def test_unknown_validation_id_is_rejected_and_creates_no_state(
     assert response.status_code == 404
     assert fake_cache.writes == []
     assert "attacker-chosen-id" not in fake_cache.store
+
+
+class FailingCache(FakeCache):
+    """Cache double whose backend is down: reads raise instead of returning a
+    miss, mirroring what get_strict propagates."""
+
+    async def get_strict(self, key: str) -> Any:
+        raise RuntimeError("cache unavailable")
+
+
+def test_cache_outage_returns_503_not_false_404(
+    test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The executor deletes containers on 404, so a transient store outage
+    must surface as 503 — never as a missing-record 404 that would reap a
+    live validation."""
+    cache = FailingCache()
+    monkeypatch.setattr(shells_module, "cache_manager", cache)
+
+    response = test_client.post(
+        VALIDATION_URL,
+        json={"status": "running", "progress": 50},
+        headers={"Authorization": f"Bearer {INTERNAL_TOKEN}"},
+    )
+
+    assert response.status_code == 503
+    assert cache.writes == []
 
 
 async def test_mismatched_executor_name_rejected_without_cleanup(

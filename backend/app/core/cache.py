@@ -69,6 +69,25 @@ class RedisCache:
             logger.error(f"Error getting cache key {key}: {str(e)}")
             return None
 
+    async def get_strict(self, key: str) -> Optional[Any]:
+        """Get value from cache, raising on backend errors.
+
+        Unlike get(), a cache outage propagates to the caller so it can
+        distinguish "key absent" from "cache unavailable".
+        """
+        client = await self._get_client()
+        try:
+            data = await client.get(key)
+            if data is None:
+                return None
+            try:
+                return orjson.loads(data)
+            except Exception:
+                # If value was stored as plain bytes/string
+                return data
+        finally:
+            await client.aclose()
+
     async def mget(self, keys: List[str]) -> Dict[str, Any]:
         """Get multiple values from cache in a single request.
 

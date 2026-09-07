@@ -258,6 +258,7 @@ def test_create_instance_reports_pulling_image_before_docker_run(mocker, configu
 
     assert order == ["report:pulling_image", "docker_run", "report:starting_container"]
     assert report_mock.call_args_list[0].kwargs["executor_name"] == "exec-1"
+    assert report_mock.call_args_list[1].kwargs["executor_name"] == "exec-1"
 
 
 @pytest.mark.asyncio
