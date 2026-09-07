@@ -23,6 +23,7 @@ import yaml
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.services.egress_guard import guarded_httpx_client, validate_outbound_url
 from app.services.git_skill.models import (
     GitSkillInfo,
     ParsedRepoUrl,
@@ -285,7 +286,8 @@ def download_repo_zip(
     )
 
     try:
-        with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+        validate_outbound_url(download_url)
+        with guarded_httpx_client(timeout=120.0) as client:
             # Use headers for authentication (preferred for GitHub)
             # Fall back to basic auth for other providers
             if zip_headers:
@@ -311,9 +313,10 @@ def download_repo_zip(
                 domain = provider.host
                 raise check_private_repo_error(domain, auth_source)
             if response.status_code != 200:
+                # Do not reflect the remote response body back to the caller.
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"Failed to download repository: {response.text}",
+                    detail=f"Failed to download repository (HTTP {response.status_code})",
                 )
             return response.content
     except httpx.RequestError as e:

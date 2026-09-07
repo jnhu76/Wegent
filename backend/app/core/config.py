@@ -711,6 +711,12 @@ class Settings(BaseSettings):
     #          chat_shell/knowledge_runtime -> Backend internal API
     # Generate using: openssl rand -hex 32
     INTERNAL_SERVICE_TOKEN: str = ""
+    # Administrator-controlled allowlist of private network targets that
+    # user-controlled outbound requests may reach despite the default-deny
+    # egress policy (e.g. self-hosted Gitea, GitLab, or Dify).
+    # Comma-separated exact hostnames or CIDRs, e.g.
+    # "gitea.internal.company.com,10.0.0.0/8,192.168.1.0/24"
+    EGRESS_PRIVATE_NETWORK_ALLOWLIST: str = ""
     # Knowledge runtime service URL for remote RAG execution
     KNOWLEDGE_RUNTIME_URL: str = "http://localhost:8200"
     # RAG data-plane execution mode

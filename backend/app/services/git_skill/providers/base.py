@@ -16,6 +16,7 @@ from typing import Dict, Optional, Tuple
 import httpx
 from fastapi import HTTPException
 
+from app.services.egress_guard import guarded_httpx_client, validate_outbound_url
 from app.services.git_skill.models import RepoAuthInfo
 
 logger = logging.getLogger(__name__)
@@ -76,13 +77,14 @@ class GitRepoProvider(ABC):
         Subclasses can override specific parts via hook methods.
         """
         url = self.get_api_url(owner, repo)
+        validate_outbound_url(url)
         headers = self.get_api_headers(auth) if auth else {}
 
         # Log request details
         self._log_api_request(url, auth, headers)
 
         try:
-            with httpx.Client(timeout=30.0) as client:
+            with guarded_httpx_client(timeout=30.0) as client:
                 response = client.get(url, headers=headers if headers else None)
 
                 self._log_api_response(url, response.status_code)
@@ -136,9 +138,10 @@ class GitRepoProvider(ABC):
                 detail="Authentication failed. Please check your access token.",
             )
         if response.status_code != 200:
+            # Do not reflect the remote response body back to the caller.
             raise HTTPException(
                 status_code=response.status_code,
-                detail=f"Failed to get repository info: {response.text}",
+                detail=(f"Failed to get repository info (HTTP {response.status_code})"),
             )
 
 
