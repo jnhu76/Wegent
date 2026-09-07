@@ -259,6 +259,20 @@ def test_guarded_client_refuses_private_redirect(listener, allow_loopback) -> No
     assert _Listener.hits == ["/start"]
 
 
+def test_guarded_client_preserves_caller_event_hooks() -> None:
+    """The guard appends its redirect check to a COPY of the caller's hook
+    mapping; reusing one hook mapping for a second client must not stack a
+    second policy check onto the first client's hooks."""
+    caller_hooks = {"response": [lambda response: None]}
+
+    with guarded_httpx_client(event_hooks=caller_hooks) as client:
+        assert len(caller_hooks["response"]) == 1
+        assert len(client._event_hooks["response"]) == 2
+
+    with guarded_httpx_client(event_hooks=caller_hooks) as second_client:
+        assert len(second_client._event_hooks["response"]) == 2
+
+
 # ---------------------------------------------------------------------------
 # Integration: git skill scan (BUG-005)
 # ---------------------------------------------------------------------------

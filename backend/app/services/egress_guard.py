@@ -181,9 +181,12 @@ def guarded_httpx_client(**kwargs) -> httpx.Client:
     """Create an httpx.Client that enforces the egress policy on every hop.
 
     Use this for any request whose URL is (partially) user-controlled. Every
-    redirect hop is revalidated before the client follows it.
+    redirect hop is revalidated before the client follows it. The caller's
+    event hook mapping is copied, never mutated.
     """
     kwargs.setdefault("follow_redirects", True)
-    event_hooks = kwargs.setdefault("event_hooks", {})
-    event_hooks.setdefault("response", []).append(_check_redirect_hop)
+    caller_hooks = kwargs.pop("event_hooks", None) or {}
+    hooks = {name: list(hook_list) for name, hook_list in caller_hooks.items()}
+    hooks.setdefault("response", []).append(_check_redirect_hop)
+    kwargs["event_hooks"] = hooks
     return httpx.Client(**kwargs)
