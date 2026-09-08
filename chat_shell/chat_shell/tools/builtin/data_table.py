@@ -162,7 +162,7 @@ class DataTableTool(BaseTool):
 
         # Call backend internal API (authenticated with the internal service token)
         headers = {}
-        service_token = getattr(settings, "INTERNAL_SERVICE_TOKEN", "")
+        service_token = settings.backend_internal_token
         if service_token:
             headers["Authorization"] = f"Bearer {service_token}"
         async with httpx.AsyncClient(timeout=60.0) as client:
