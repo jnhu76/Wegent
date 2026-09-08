@@ -160,7 +160,11 @@ class DataTableTool(BaseTool):
             "max_records": max_records,
         }
 
-        # Call backend internal API (no authentication required for internal endpoints)
+        # Call backend internal API (authenticated with the internal service token)
+        headers = {}
+        service_token = getattr(settings, "INTERNAL_SERVICE_TOKEN", "")
+        if service_token:
+            headers["Authorization"] = f"Bearer {service_token}"
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 # Use internal API endpoint for service-to-service communication
@@ -168,7 +172,7 @@ class DataTableTool(BaseTool):
                 logger.info(f"[DataTableTool] Calling backend internal API: {url}")
                 logger.debug(f"[DataTableTool] Request data: {request_data}")
 
-                response = await client.post(url, json=request_data)
+                response = await client.post(url, json=request_data, headers=headers)
                 response.raise_for_status()
 
                 result = response.json()

@@ -37,6 +37,20 @@ def test_invalid_authorization_is_rejected_when_token_is_configured(monkeypatch)
     assert exc_info.value.detail == "Invalid authentication token"
 
 
+def test_non_ascii_authorization_is_rejected_with_401_not_500(monkeypatch):
+    """ASGI servers decode header values as latin-1, so a crafted bearer can
+    carry non-ASCII characters. The dependency must answer 401; comparing
+    non-ASCII strings with hmac.compare_digest raises TypeError, so the
+    comparison must happen on bytes to keep the 401 path."""
+    monkeypatch.setattr(settings, "INTERNAL_SERVICE_TOKEN", "test-internal-token")
+
+    with pytest.raises(HTTPException) as exc_info:
+        verify_internal_service_token(credentials=_credentials("tökën-ïnvälid"))
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid authentication token"
+
+
 def test_valid_authorization_is_accepted_when_token_is_configured(monkeypatch):
     monkeypatch.setattr(settings, "INTERNAL_SERVICE_TOKEN", "test-internal-token")
 

@@ -20,11 +20,12 @@ For terminal events (DONE, ERROR, CANCELLED), StatusUpdatingEmitter handles:
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db.session import SessionLocal
 from app.models.task import TaskResource
+from app.services.auth.internal_service_token import verify_internal_service_token
 from app.services.channels.callback import forward_event_to_channel_callbacks
 
 # Import channel callback modules to ensure they register with
@@ -42,7 +43,11 @@ from shared.models import EventType
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/callback", tags=["execution-callback"])
+router = APIRouter(
+    prefix="/callback",
+    tags=["execution-callback"],
+    dependencies=[Depends(verify_internal_service_token)],
+)
 
 # Shared event parser instance
 _event_parser = ResponsesAPIEventParser()

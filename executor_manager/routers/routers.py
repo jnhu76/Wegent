@@ -27,7 +27,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from executor_manager.common.config import ROUTE_PREFIX
-from executor_manager.config.config import EXECUTOR_DISPATCHER_MODE
+from executor_manager.config.config import EXECUTOR_DISPATCHER_MODE, INTERNAL_SERVICE_TOKEN
 from executor_manager.executors.dispatcher import ExecutorDispatcher
 from executor_manager.executors.docker.constants import DEFAULT_DOCKER_HOST
 from executor_manager.executors.docker.utils import get_running_task_details
@@ -273,8 +273,11 @@ async def callback_handler(event_data: dict = Body(...), http_request: Request =
         task_api_domain = os.getenv("TASK_API_DOMAIN", "http://localhost:8000")
         callback_url = f"{task_api_domain}/api/internal/callback"
 
+        headers = {}
+        if INTERNAL_SERVICE_TOKEN:
+            headers["Authorization"] = f"Bearer {INTERNAL_SERVICE_TOKEN}"
         async with traced_async_client(timeout=30.0) as client:
-            response = await client.post(callback_url, json=event_data)
+            response = await client.post(callback_url, json=event_data, headers=headers)
             if response.status_code != 200:
                 logger.warning(
                     f"[Callback] Backend returned error: "

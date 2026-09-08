@@ -50,7 +50,10 @@ test.describe('Remote Workspace', () => {
     }
   })
 
-  test('desktop code task shows disabled entry when sandbox unavailable', async ({ page }) => {
+  test('desktop code task shows disabled entry when sandbox unavailable', async ({
+    page,
+    request,
+  }) => {
     const teamsResponse = await apiClient.get<TeamListResponse>(
       '/api/teams?page=1&limit=100&scope=all'
     )
@@ -89,17 +92,28 @@ test.describe('Remote Workspace', () => {
     const assistantSubtask = subtasks.find(subtask => String(subtask.role) === 'ASSISTANT')
     expect(assistantSubtask).toBeTruthy()
 
-    const callbackResponse = await apiClient.post('/api/internal/callback', {
-      event_type: 'error',
-      task_id: taskId,
-      subtask_id: assistantSubtask?.id,
-      executor_name: `executor-${taskId}`,
-      executor_namespace: 'default',
+    // The internal callback endpoint requires the internal service token,
+    // not a user JWT, so send it directly with the internal token.
+    const internalToken = process.env.E2E_INTERNAL_SERVICE_TOKEN || ''
+    expect(internalToken).toBeTruthy()
+    const apiBaseUrl = process.env.E2E_API_URL || 'http://localhost:8000'
+    const callbackResponse = await request.post(`${apiBaseUrl}/api/internal/callback`, {
+      headers: {
+        Authorization: `Bearer ${internalToken}`,
+        'Content-Type': 'application/json',
+      },
       data: {
-        message: 'force unavailable state for e2e',
+        event_type: 'error',
+        task_id: taskId,
+        subtask_id: assistantSubtask?.id,
+        executor_name: `executor-${taskId}`,
+        executor_namespace: 'default',
+        data: {
+          message: 'force unavailable state for e2e',
+        },
       },
     })
-    expect(callbackResponse.status).toBe(200)
+    expect(callbackResponse.status()).toBe(200)
 
     const statusResponse = await apiClient.get<RemoteWorkspaceStatusResponse>(
       `/api/tasks/${taskId}/remote-workspace/status`

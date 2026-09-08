@@ -7,14 +7,27 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.subtask import Subtask, SubtaskRole, SubtaskStatus
 from app.models.task import TaskResource
 from app.models.user import User
 from app.schemas.kind import ArchiveInfo
 from app.services.workspace_archive import archive_service, archive_storage_service
+
+INTERNAL_TOKEN = "test-internal-token"
+
+
+@pytest.fixture(autouse=True)
+def configure_internal_service_token(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "INTERNAL_SERVICE_TOKEN", INTERNAL_TOKEN)
+
+
+def _internal_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {INTERNAL_TOKEN}"}
 
 
 def _create_task(test_db: Session, task_id: int, user_id: int) -> TaskResource:
@@ -116,7 +129,10 @@ def test_manual_archive_endpoint_updates_task_archive(
         ),
     )
 
-    response = test_client.post(f"/api/internal/workspace-archives/{task.id}/archive")
+    response = test_client.post(
+        f"/api/internal/workspace-archives/{task.id}/archive",
+        headers=_internal_headers(),
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -153,7 +169,10 @@ def test_manual_archive_endpoint_returns_404_without_executor(
 ):
     task = _create_task(test_db, task_id=1386, user_id=test_user.id)
 
-    response = test_client.post(f"/api/internal/workspace-archives/{task.id}/archive")
+    response = test_client.post(
+        f"/api/internal/workspace-archives/{task.id}/archive",
+        headers=_internal_headers(),
+    )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "No active executor found for task"
@@ -184,6 +203,7 @@ def test_archive_sandbox_endpoint_uses_sandbox_runtime(
             "executor_name": "sandbox-1501",
             "executor_namespace": "default",
         },
+        headers=_internal_headers(),
     )
 
     assert response.status_code == 200
@@ -218,6 +238,7 @@ def test_restore_sandbox_endpoint_uses_sandbox_runtime(
             "executor_name": "sandbox-1502",
             "executor_namespace": "default",
         },
+        headers=_internal_headers(),
     )
 
     assert response.status_code == 200

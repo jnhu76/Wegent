@@ -19,6 +19,7 @@ The callback endpoint at /api/internal/callback handles:
 import os
 from typing import Any, Dict, Optional
 
+from executor_manager.config.config import INTERNAL_SERVICE_TOKEN
 from shared.logger import setup_logger
 from shared.models.responses_api import ResponsesAPIStreamEvents
 from shared.utils.http_client import traced_async_client
@@ -111,8 +112,13 @@ class CallbackClient:
         event_type = event_data.get("event_type", "")
 
         try:
+            headers = {}
+            if INTERNAL_SERVICE_TOKEN:
+                headers["Authorization"] = f"Bearer {INTERNAL_SERVICE_TOKEN}"
             async with traced_async_client(timeout=self.timeout) as client:
-                response = await client.post(self.callback_url, json=event_data)
+                response = await client.post(
+                    self.callback_url, json=event_data, headers=headers
+                )
                 if response.status_code == 200:
                     logger.info(
                         f"[CallbackClient] Sent {event_type} callback for task {task_id}"
