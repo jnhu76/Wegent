@@ -15,6 +15,10 @@ import os
 
 TASK_API_DOMAIN = os.getenv("TASK_API_DOMAIN", "http://localhost:8000")
 
+# Internal service token shared with Backend. Sent as a Bearer header on
+# Backend-bound internal API calls (callbacks, workspace archive/restore).
+INTERNAL_SERVICE_TOKEN = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+
 # API timeout
 API_TIMEOUT = 3  # API request timeout (seconds)
 

@@ -73,9 +73,11 @@ def verify_internal_service_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Use constant-time comparison to prevent timing attacks
-    provided_token = credentials.credentials
-    if not hmac.compare_digest(provided_token, expected_token):
+    # Use constant-time comparison to prevent timing attacks. Compare bytes so
+    # a non-ASCII bearer token is rejected with 401 instead of raising TypeError.
+    provided_bytes = credentials.credentials.encode("utf-8")
+    expected_bytes = expected_token.encode("utf-8")
+    if not hmac.compare_digest(provided_bytes, expected_bytes):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",
